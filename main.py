@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import os, sys, yaml, time, multiprocessing
+import os, sys, yaml, time, multiprocessing, signal
 
 from nvr import NVR
 
@@ -15,10 +15,12 @@ def setup_nvrs(storage_dirpath: str, configs: dict):
         # Parse config
         source = config['source']
         segment_duration_s = config['segmentDurationSeconds']
+        max_age_hours = config['maxAgeHours']
+        max_disk_gb = config['maxDiskGB']
         monitor_storage_dirpath = os.path.join(storage_dirpath, name)
 
         # Create NVR
-        nvrs[name] = NVR(name, source, segment_duration_s, monitor_storage_dirpath)
+        nvrs[name] = NVR(name, source, segment_duration_s, monitor_storage_dirpath, max_age_hours, max_storage_gb)
 
     return nvrs
 
@@ -27,10 +29,24 @@ def start(storage_dirpath: str, max_storage_gb: float, monitor_configs: dict):
     procs = {}
 
     for name, nvr in nvrs.items():
-        procs[name] = multiprocessing.Process(target=nvr.start)
+        procs[name] = multiprocessing.Process(target=nvr.start, daemon=True)
 
     for name, proc in procs.items():
         proc.start()
+
+    try:
+        while True:
+            print('Main is running!')
+            time.sleep(5)
+    except KeyboardInterrupt:
+        for name, nvr in nvrs.items():
+            print(f'Stopping {name}')
+            nvr.stop()
+
+        for name, proc in procs.items():
+            proc.join()
+    finally:
+        print('Done!')
 
 if __name__ == '__main__':
     try:
