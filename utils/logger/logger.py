@@ -1,11 +1,11 @@
-from .. import datetime
+from datetime import datetime
 
 class Logger:
     def __init__(self, logfile):
         self._logfile = logfile
 
     def _log(self, message):
-        message = f'{datetime.get_datetime()} - {message}'
+        message = f'{datetime.now().isoformat()} - {message}'
 
         print(message)
         # with open(self._logfile, 'a') as f:

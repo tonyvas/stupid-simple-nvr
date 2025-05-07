@@ -1,0 +1,27 @@
+# Required
+# Root storage directory
+storage: ./videos
+
+# Required
+# Global storage limit in GB, will delete oldest videos from any monitor to stay below this
+max-disk-gb: 10
+
+monitors:
+    # Monitor name, will also act as the ID
+    # Should be unique
+    example:
+        # Required
+        # Source of stream, should be something FFmpeg can read
+        # source: rtsp://username:password@example/stream
+
+        # Required
+        # Max duration of video segments in seconds
+        # segment-duration-sec: 300
+
+        # Max age of videos in hours. Anything older will be deleted
+        # Set to null to disable check
+        # max-age-hours: 1
+
+        # Storage limit in GB for this monitor. Oldest videos will be deleted to stay below this limit
+        # Set to null to disable check
+        # max-disk-gb: 5
