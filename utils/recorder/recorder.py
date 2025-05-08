@@ -144,7 +144,7 @@ class Recorder:
             '-segment_atclocktime', '1',
             '-reset_timestamps', '1'
         ]
-        OUTPUT_ARGS = ['-y', os.path.join(self._temp_dirpath, '%F_%H-%M-%S.mp4')]
+        OUTPUT_ARGS = ['-y', os.path.join(self._temp_dirpath, '%F_%H-%M-%S.mkv')]
 
         cmd = ['ffmpeg']
 
