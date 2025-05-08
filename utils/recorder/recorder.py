@@ -4,22 +4,23 @@ from time import sleep
 from ..logger import Logger
 
 class Recorder:
-    def __init__(self, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, max_age_hours:float|None=None, max_disk_gb:float|None=None):
+    def __init__(self, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, record_audio:bool=True, max_age_hours:float|None=None, max_disk_gb:float|None=None):
         self._storage_dirpath = storage_dirpath
         self._name = name
         self._source = source
         self._segment_duration_sec = segment_duration_sec
+        self._record_audio = record_audio
         self._max_age_hours = max_age_hours
         self._max_disk_gb = max_disk_gb
 
         self._is_running = False
 
         self._threads = [
+            threading.Thread(target=self._start_limit_checker, daemon=True),
             threading.Thread(target=self._start_video_mover, daemon=True),
-            threading.Thread(target=self._start_recorder, daemon=True),
-            threading.Thread(target=self._start_limit_checker, daemon=True)
+            threading.Thread(target=self._start_ffmpeg, daemon=True),
         ]
-        self._subprocess = None
+        self._ffmpeg = None
 
         self._video_dirpath = os.path.join(storage_dirpath, 'videos')
         self._temp_dirpath = os.path.join(storage_dirpath, 'temp')
@@ -47,9 +48,10 @@ class Recorder:
             for thread in self._threads:
                 thread.start()
 
-            self._log_info('Recorder started!')
             for thread in self._threads:
                 thread.join()
+
+            self._log_info('Recorder started!')
         except Exception as e:
             message = f'Failed to start: {e}'
             self._log_error(message)
@@ -62,11 +64,11 @@ class Recorder:
             # Clear flag
             self._is_running = False
 
-            if self._subprocess is not None:
-                # Stop subprocess if it is running
-                self._log_info('Terminating subprocess...')
-                self._subprocess.terminate()
-                self._subprocess.wait()
+            if self._ffmpeg is not None:
+                # Stop FFmpeg subprocess if it is running
+                self._log_info('Terminating FFmpeg subprocess...')
+                self._ffmpeg.terminate()
+                self._ffmpeg.wait()
 
             self._log_info('Waiting for threads to finish...')
             for thread in self._threads:
@@ -84,16 +86,9 @@ class Recorder:
     def _log_error(self, message):
         self._logger.log_error(f'{self._name}: {message}')
 
-    def _start_video_mover(self):
-        while self.is_running():
-            try:
-                self._log_info(f'Checking for completed videos to move...')
-            except Exception as e:
-                self._log_error(f'Failed to run mover: {e}')
-            finally:
-                sleep(5)
-
     def _start_limit_checker(self):
+        self._log_info(f'Starting limit checker...')
+
         while self.is_running():
             try:
                 # Check limits
@@ -105,27 +100,78 @@ class Recorder:
                 # Delay before next check
                 sleep(5)
 
-    def _start_recorder(self):
+    def _start_video_mover(self):
+        self._log_info(f'Starting video mover...')
+
         while self.is_running():
             try:
-                self._log_info(f'Recording {self._name}...')
+                pass
             except Exception as e:
-                self._log_error(f'Failed to run recorder: {e}')
+                self._log_error(f'Failed to run mover: {e}')
             finally:
-                # Delay before restarting recorder
                 sleep(5)
+
+    def _start_ffmpeg(self):
+        ffmpeg_cmd = self._generate_ffmpeg_command()
+        os.makedirs(self._temp_dirpath, exist_ok=True)
+
+        while self.is_running():
+            try:
+                self._log_info(f'Starting FFmpeg subprocess...')
+
+                self._ffmpeg = subprocess.Popen(ffmpeg_cmd, text=True, bufsize=1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+                while self._ffmpeg.poll() is None:
+                    line = self._ffmpeg.stderr.readline().rstrip()
+                    if line:
+                        self._log_info(f'FFmpeg: {line}')
+            except Exception as e:
+                self._log_error(f'Failed to run FFmpeg subprocess: {e}')
+            finally:
+                sleep(5)
+
+    def _generate_ffmpeg_command(self):
+        RTSP_ARGS = ['-rtsp_transport', 'tcp']
+        LOG_ARGS = ['-loglevel', 'error']
+        INPUT_ARGS = ['-i', self._source]
+        VCODEC_ARGS = ['-c:v', 'copy']
+        ACODEC_ARGS = ['-c:a', 'aac']
+        NO_ACODEC_ARGS = ['-an']
+        SEGMENT_ARGS = [
+            '-f', 'segment',
+            '-segment_time', str(self._segment_duration_sec),
+            '-strftime', '1',
+            '-segment_atclocktime', '1',
+            '-reset_timestamps', '1'
+        ]
+        OUTPUT_ARGS = ['-y', os.path.join(self._temp_dirpath, '%F_%H-%M-%S.mp4')]
+
+        cmd = ['ffmpeg']
+
+        for arg_list in [ RTSP_ARGS, LOG_ARGS, INPUT_ARGS, VCODEC_ARGS ]:
+            for arg in arg_list:
+                cmd.append(arg)
+        
+        if self._record_audio:
+            for arg in ACODEC_ARGS:
+                cmd.append(arg)
+        else:
+            for arg in NO_ACODEC_ARGS:
+                cmd.append(arg)
+
+        for arg_list in [ SEGMENT_ARGS, OUTPUT_ARGS ]:
+            for arg in arg_list:
+                cmd.append(arg)
+
+        return cmd
 
     def _check_storage_limit(self):
         if self._max_disk_gb is None:
             return
 
-        self._log_info('Checking storage...')
-
     def _check_age_limit(self):
         if self._max_age_hours is None:
             return
-
-        self._log_info('Checking age...')
 
     def _prune_oldest(self):
         pass

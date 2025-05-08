@@ -18,6 +18,9 @@ monitors:
         # Max duration of video segments in seconds
         # segment-duration-sec: 300
 
+        # Whether or not to include audio
+        # record-audio: true
+
         # Max age of videos in hours. Anything older will be deleted
         # Set to null to disable check
         # max-age-hours: 1

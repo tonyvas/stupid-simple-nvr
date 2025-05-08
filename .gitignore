@@ -1,6 +1,9 @@
 # Ignore live config
 config.yml
 
+# Ignore video dump directory
+dump
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

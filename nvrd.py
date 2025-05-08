@@ -24,6 +24,7 @@ def setup_recorders(storage_dirpath:str, monitor_configs:dict):
     try:
         SOURCE_KEY = 'source'
         SEGMENT_DURATION_KEY = 'segment-duration-sec'
+        RECORD_AUDIO_KEY = 'record-audio'
         MAX_AGE_KEY = 'max-age-hours'
         MAX_DISK_KEY = 'max-disk-gb'
 
@@ -33,10 +34,11 @@ def setup_recorders(storage_dirpath:str, monitor_configs:dict):
             monitor_dirpath = os.path.join(storage_dirpath, name)
             source = config[SOURCE_KEY]
             segment_duration_sec = int(config[SEGMENT_DURATION_KEY])
+            record_audio = config[RECORD_AUDIO_KEY]
             max_age_hours = float(config[MAX_AGE_KEY]) * 3600 if config[MAX_AGE_KEY] is not None else None
             max_disk_gb = float(config[MAX_DISK_KEY]) * 1e9 if config[MAX_DISK_KEY] is not None else None
 
-            recorders[name] = Recorder(monitor_dirpath, name, source, segment_duration_sec, max_age_hours, max_disk_gb)
+            recorders[name] = Recorder(monitor_dirpath, name, source, segment_duration_sec, record_audio, max_age_hours, max_disk_gb)
 
         return recorders
     except Exception as e:
@@ -48,7 +50,7 @@ def setup(config:dict):
     MONITORS_KEY = 'monitors'
 
     try:
-        storage_dirpath = config[STORAGE_DIRPATH_KEY]
+        storage_dirpath = os.path.join(SCRIPT_DIR, config[STORAGE_DIRPATH_KEY])
         global_max_disk_gb = float(config[GLOBAL_MAX_DISK_KEY]) * 1e9
         
         return setup_recorders(storage_dirpath, config[MONITORS_KEY])
