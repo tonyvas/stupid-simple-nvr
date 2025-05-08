@@ -50,7 +50,10 @@ def setup(config:dict):
     MONITORS_KEY = 'monitors'
 
     try:
-        storage_dirpath = os.path.join(SCRIPT_DIR, config[STORAGE_DIRPATH_KEY])
+        storage_dirpath = config[STORAGE_DIRPATH_KEY]
+        if not storage_dirpath.startswith('/'):
+            storage_dirpath = os.path.join(SCRIPT_DIR, storage_dirpath)
+
         global_max_disk_gb = float(config[GLOBAL_MAX_DISK_KEY]) * 1e9
         
         return setup_recorders(storage_dirpath, config[MONITORS_KEY])
