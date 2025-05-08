@@ -1,4 +1,4 @@
-import threading, subprocess, os
+import threading, subprocess, os, psutil, shutil
 from time import sleep
 
 from ..logger import Logger
@@ -103,13 +103,59 @@ class Recorder:
     def _start_video_mover(self):
         self._log_info(f'Starting video mover...')
 
+        # Create directories if needed
+        os.makedirs(self._temp_dirpath, exist_ok=True)
+        os.makedirs(self._video_dirpath, exist_ok=True)
+
         while self.is_running():
             try:
-                pass
+                # For each completed .mkv file
+                for temp_mkv_path in self._get_completed_temp_videos():
+                    self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
+
+                    # Get temp and final .mp4 paths
+                    temp_mp4_path = temp_mkv_path.replace('.mkv', '.mp4')
+                    final_mp4_path = os.path.join(self._video_dirpath, os.path.basename(temp_mp4_path))
+
+                    # Convert temp mkv to mp4
+                    self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
+                    # Move mp4 from temp to final directory
+                    shutil.move(temp_mp4_path, final_mp4_path)
+                    # Delete original temp mkv
+                    os.remove(temp_mkv_path)
             except Exception as e:
                 self._log_error(f'Failed to run mover: {e}')
             finally:
                 sleep(5)
+
+    def _get_completed_temp_videos(self):
+        # List of files ending in .mkv
+        filepaths = []
+        for filename in sorted(os.listdir(self._temp_dirpath)):
+            if not filename.endswith('.mkv'):
+                continue
+
+            filepaths.append(os.path.join(self._temp_dirpath, filename))
+
+        # Return all filenames except the last
+        return filepaths[:-1]
+
+    def _mkv_to_mp4(self, input_path, output_path):
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-loglevel', 'error',
+            '-threads', '2',
+            '-i', input_path,
+            '-c', 'copy',
+            '-y', output_path
+        ]
+
+        proc = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            raise Exception(f'Failed to convert MKV to MP4: {stderr}')
 
     def _start_ffmpeg(self):
         ffmpeg_cmd = self._generate_ffmpeg_command()
