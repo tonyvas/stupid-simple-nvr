@@ -1,5 +1,6 @@
 import threading, subprocess, os, psutil, shutil
 from time import sleep
+from datetime import datetime
 
 from ..logger import Logger
 
@@ -119,10 +120,8 @@ class Recorder:
                 sleep(5)
 
     def _parse_video_datetime(self, filename):
-        datetime = filename.split('.')[0]
-        date, time = datetime.split('_')
-
-        return (date, time)
+        unix_timestamp = int(filename.split('.')[0])
+        return datetime.utcfromtimestamp(unix_timestamp)
 
     def _move_completed_temp_videos(self):
         # For each completed .mkv file
@@ -131,10 +130,10 @@ class Recorder:
 
             # Get temp and final .mp4 paths
             video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
-            video_date = video_datetime[0]
+            video_date_str = video_datetime.date().isoformat()
 
             temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
-            final_mp4_path = os.path.join(self._video_dirpath, video_date, os.path.basename(temp_mp4_path))
+            final_mp4_path = os.path.join(self._video_dirpath, video_date_str, os.path.basename(temp_mp4_path))
 
             # Make directory for final path
             os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
@@ -207,7 +206,7 @@ class Recorder:
             '-segment_atclocktime', '1',
             '-reset_timestamps', '1'
         ]
-        OUTPUT_ARGS = ['-y', os.path.join(self._temp_dirpath, '%F_%H-%M-%S.mkv')]
+        OUTPUT_ARGS = ['-y', os.path.join(self._temp_dirpath, '%s.mkv')]
 
         cmd = ['ffmpeg']
 
