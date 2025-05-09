@@ -1,6 +1,6 @@
 import threading, subprocess, os, psutil, shutil
 from time import sleep
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..logger import Logger
 
@@ -8,14 +8,14 @@ class Recorder:
     _MKV_EXTENSION = '.mkv'
     _MP4_EXTENSION = '.mp4'
 
-    def __init__(self, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, record_audio:bool=True, max_age_hours:float|None=None, max_disk_gb:float|None=None):
+    def __init__(self, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, record_audio:bool=True, max_age_sec:int|None=None, max_disk_bytes:int|None=None):
         self._storage_dirpath = storage_dirpath
         self._name = name
         self._source = source
         self._segment_duration_sec = segment_duration_sec
         self._record_audio = record_audio
-        self._max_age_hours = max_age_hours
-        self._max_disk_gb = max_disk_gb
+        self._max_age_sec = max_age_sec
+        self._max_disk_bytes = max_disk_bytes
 
         self._is_running = False
 
@@ -33,6 +33,29 @@ class Recorder:
 
     def is_running(self):
         return self._is_running
+
+    def get_videos(self):
+        video_paths = {}
+
+        # Walk over the files in output directory
+        for dirpath, dirnames, filenames in os.walk(self._video_dirpath):
+            for filename in filenames:
+                # Ignore non-video files
+                if not filename.endswith(self._MP4_EXTENSION):
+                    continue
+
+                # Get date and full filepath
+                date = os.path.basename(dirpath)
+                filepath = os.path.join(dirpath, filename)
+
+                # Save path to dict
+                if date not in video_paths:
+                    video_paths[date] = []
+
+                video_paths[date].append(filepath)
+
+        # Return dict sorted by date and time
+        return { k: sorted(v) for k,v in video_paths.items() }
 
     def start(self):
         try:
@@ -90,6 +113,10 @@ class Recorder:
     def _log_error(self, message):
         self._logger.log_error(f'{self._name}: {message}')
 
+    def _parse_video_datetime(self, filename):
+        unix_timestamp = int(filename.split('.')[0])
+        return datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
+
     def _start_limit_checker(self):
         self._log_info(f'Starting limit checker...')
 
@@ -118,60 +145,6 @@ class Recorder:
                 self._log_error(f'Failed to run mover: {e}')
             finally:
                 sleep(5)
-
-    def _parse_video_datetime(self, filename):
-        unix_timestamp = int(filename.split('.')[0])
-        return datetime.utcfromtimestamp(unix_timestamp)
-
-    def _move_completed_temp_videos(self):
-        # For each completed .mkv file
-        for temp_mkv_path in self._get_completed_temp_videos():
-            self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
-
-            # Get temp and final .mp4 paths
-            video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
-            video_date_str = video_datetime.date().isoformat()
-
-            temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
-            final_mp4_path = os.path.join(self._video_dirpath, video_date_str, os.path.basename(temp_mp4_path))
-
-            # Make directory for final path
-            os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
-            # Convert temp mkv to mp4
-            self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
-            # Move mp4 from temp to final directory
-            shutil.move(temp_mp4_path, final_mp4_path)
-            # Delete original temp mkv
-            os.remove(temp_mkv_path)
-
-    def _get_completed_temp_videos(self):
-        # List of files ending in .mkv
-        filepaths = []
-        for filename in sorted(os.listdir(self._temp_dirpath)):
-            if not filename.endswith(self._MKV_EXTENSION):
-                continue
-
-            filepaths.append(os.path.join(self._temp_dirpath, filename))
-
-        # Return all filenames except the last
-        return filepaths[:-1]
-
-    def _mkv_to_mp4(self, input_path, output_path):
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-        ffmpeg_cmd = [
-            'ffmpeg',
-            '-loglevel', 'error',
-            '-threads', '2',
-            '-i', input_path,
-            '-c', 'copy',
-            '-y', output_path
-        ]
-
-        proc = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if proc.returncode != 0:
-            stderr = proc.stderr.decode('utf-8')
-            raise Exception(f'Failed to convert MKV to MP4: {stderr}')
 
     def _start_ffmpeg(self):
         ffmpeg_cmd = self._generate_ffmpeg_command()
@@ -227,16 +200,84 @@ class Recorder:
 
         return cmd
 
+    def _move_completed_temp_videos(self):
+        # For each completed .mkv file
+        for temp_mkv_path in self._get_completed_temp_videos():
+            self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
+
+            # Get temp and final .mp4 paths
+            video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
+            video_date_str = video_datetime.date().isoformat()
+
+            temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
+            final_mp4_path = os.path.join(self._video_dirpath, video_date_str, os.path.basename(temp_mp4_path))
+
+            # Make directory for final path
+            os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
+            # Convert temp mkv to mp4
+            self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
+            # Move mp4 from temp to final directory
+            shutil.move(temp_mp4_path, final_mp4_path)
+            # Delete original temp mkv
+            os.remove(temp_mkv_path)
+
+    def _get_completed_temp_videos(self):
+        # List of files ending in .mkv
+        filepaths = []
+        for filename in sorted(os.listdir(self._temp_dirpath)):
+            if not filename.endswith(self._MKV_EXTENSION):
+                continue
+
+            filepaths.append(os.path.join(self._temp_dirpath, filename))
+
+        # Return all filenames except the last
+        return filepaths[:-1]
+
+    def _mkv_to_mp4(self, input_path, output_path):
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-loglevel', 'error',
+            '-threads', '2',
+            '-i', input_path,
+            '-c', 'copy',
+            '-y', output_path
+        ]
+
+        proc = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            raise Exception(f'Failed to convert MKV to MP4: {stderr}')
+
     def _check_storage_limit(self):
-        if self._max_disk_gb is None:
+        if self._max_disk_bytes is None:
             return
 
     def _check_age_limit(self):
-        if self._max_age_hours is None:
+        # If ignoring age, return
+        if self._max_age_sec is None:
             return
 
-    def _prune_oldest(self):
-        pass
+        # Get list of all videos ordered by date
+        videos = self.get_videos()
+        datetime_now = datetime.now(tz=timezone.utc)
 
-    def _get_oldest_video(self):
-        pass
+        for date in videos:
+            for filepath in videos[date]:
+                filename = os.path.basename(filepath)
+
+                # Get the UTC datetime of the video
+                datetime_video = self._parse_video_datetime(filename)
+                
+                # Calculate age of video in hours
+                datetime_diff = datetime_now - datetime_video
+                age_sec = datetime_diff.total_seconds()
+
+                if age_sec > self._max_age_sec:
+                    # If video is too old, delete it
+                    self._log_info(f'Video {filename} is too old, deleting!')
+                    os.remove(filepath)
+                else:
+                    # If not, stop checking. Further videos are even younger
+                    return
