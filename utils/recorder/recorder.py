@@ -4,6 +4,9 @@ from time import sleep
 from ..logger import Logger
 
 class Recorder:
+    _MKV_EXTENSION = '.mkv'
+    _MP4_EXTENSION = '.mp4'
+
     def __init__(self, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, record_audio:bool=True, max_age_hours:float|None=None, max_disk_gb:float|None=None):
         self._storage_dirpath = storage_dirpath
         self._name = name
@@ -109,30 +112,44 @@ class Recorder:
 
         while self.is_running():
             try:
-                # For each completed .mkv file
-                for temp_mkv_path in self._get_completed_temp_videos():
-                    self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
-
-                    # Get temp and final .mp4 paths
-                    temp_mp4_path = temp_mkv_path.replace('.mkv', '.mp4')
-                    final_mp4_path = os.path.join(self._video_dirpath, os.path.basename(temp_mp4_path))
-
-                    # Convert temp mkv to mp4
-                    self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
-                    # Move mp4 from temp to final directory
-                    shutil.move(temp_mp4_path, final_mp4_path)
-                    # Delete original temp mkv
-                    os.remove(temp_mkv_path)
+                self._move_completed_temp_videos()
             except Exception as e:
                 self._log_error(f'Failed to run mover: {e}')
             finally:
                 sleep(5)
 
+    def _parse_video_datetime(self, filename):
+        datetime = filename.split('.')[0]
+        date, time = datetime.split('_')
+
+        return (date, time)
+
+    def _move_completed_temp_videos(self):
+        # For each completed .mkv file
+        for temp_mkv_path in self._get_completed_temp_videos():
+            self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
+
+            # Get temp and final .mp4 paths
+            video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
+            video_date = video_datetime[0]
+
+            temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
+            final_mp4_path = os.path.join(self._video_dirpath, video_date, os.path.basename(temp_mp4_path))
+
+            # Make directory for final path
+            os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
+            # Convert temp mkv to mp4
+            self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
+            # Move mp4 from temp to final directory
+            shutil.move(temp_mp4_path, final_mp4_path)
+            # Delete original temp mkv
+            os.remove(temp_mkv_path)
+
     def _get_completed_temp_videos(self):
         # List of files ending in .mkv
         filepaths = []
         for filename in sorted(os.listdir(self._temp_dirpath)):
-            if not filename.endswith('.mkv'):
+            if not filename.endswith(self._MKV_EXTENSION):
                 continue
 
             filepaths.append(os.path.join(self._temp_dirpath, filename))
