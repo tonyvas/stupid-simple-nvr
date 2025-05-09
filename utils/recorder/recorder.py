@@ -35,7 +35,7 @@ class Recorder:
         return self._is_running
 
     def get_videos(self):
-        video_paths = {}
+        video_paths = []
 
         # Walk over the files in output directory
         for dirpath, dirnames, filenames in os.walk(self._video_dirpath):
@@ -44,18 +44,10 @@ class Recorder:
                 if not filename.endswith(self._MP4_EXTENSION):
                     continue
 
-                # Get date and full filepath
-                date = os.path.basename(dirpath)
-                filepath = os.path.join(dirpath, filename)
+                video_paths.append(os.path.join(dirpath, filename))
 
-                # Save path to dict
-                if date not in video_paths:
-                    video_paths[date] = []
-
-                video_paths[date].append(filepath)
-
-        # Return dict sorted by date and time
-        return { k: sorted(v) for k,v in video_paths.items() }
+        # Return videos ordered by date (date is in alphabetical order)
+        return sorted(video_paths)
 
     def start(self):
         try:
@@ -254,6 +246,8 @@ class Recorder:
         if self._max_disk_bytes is None:
             return
 
+        videos = self.get_videos()
+
     def _check_age_limit(self):
         # If ignoring age, return
         if self._max_age_sec is None:
@@ -263,21 +257,20 @@ class Recorder:
         videos = self.get_videos()
         datetime_now = datetime.now(tz=timezone.utc)
 
-        for date in videos:
-            for filepath in videos[date]:
-                filename = os.path.basename(filepath)
+        for filepath in videos:
+            filename = os.path.basename(filepath)
 
-                # Get the UTC datetime of the video
-                datetime_video = self._parse_video_datetime(filename)
-                
-                # Calculate age of video in hours
-                datetime_diff = datetime_now - datetime_video
-                age_sec = datetime_diff.total_seconds()
+            # Get the UTC datetime of the video
+            datetime_video = self._parse_video_datetime(filename)
+            
+            # Calculate age of video in hours
+            datetime_diff = datetime_now - datetime_video
+            age_sec = datetime_diff.total_seconds()
 
-                if age_sec > self._max_age_sec:
-                    # If video is too old, delete it
-                    self._log_info(f'Video {filename} is too old, deleting!')
-                    os.remove(filepath)
-                else:
-                    # If not, stop checking. Further videos are even younger
-                    return
+            if age_sec > self._max_age_sec:
+                # If video is too old, delete it
+                self._log_info(f'Video {filename} is too old, deleting!')
+                os.remove(filepath)
+            else:
+                # If not, stop checking. Further videos are even younger
+                return
