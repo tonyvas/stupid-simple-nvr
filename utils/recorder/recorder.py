@@ -67,10 +67,10 @@ class Recorder:
             for thread in self._threads:
                 thread.start()
 
+            self._log_info('Recorder started!')
+
             for thread in self._threads:
                 thread.join()
-
-            self._log_info('Recorder started!')
         except Exception as e:
             message = f'Failed to start: {e}'
             self._log_error(message)
@@ -195,23 +195,26 @@ class Recorder:
     def _move_completed_temp_videos(self):
         # For each completed .mkv file
         for temp_mkv_path in self._get_completed_temp_videos():
-            self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
+            try:
+                self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
 
-            # Get temp and final .mp4 paths
-            video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
-            video_date_str = video_datetime.date().isoformat()
+                # Get temp and final .mp4 paths
+                video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
+                video_date_str = video_datetime.date().isoformat()
 
-            temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
-            final_mp4_path = os.path.join(self._video_dirpath, video_date_str, os.path.basename(temp_mp4_path))
+                temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
+                final_mp4_path = os.path.join(self._video_dirpath, video_date_str, os.path.basename(temp_mp4_path))
 
-            # Make directory for final path
-            os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
-            # Convert temp mkv to mp4
-            self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
-            # Move mp4 from temp to final directory
-            shutil.move(temp_mp4_path, final_mp4_path)
-            # Delete original temp mkv
-            os.remove(temp_mkv_path)
+                # Make directory for final path
+                os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
+                # Convert temp mkv to mp4
+                self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
+                # Move mp4 from temp to final directory
+                shutil.move(temp_mp4_path, final_mp4_path)
+                # Delete original temp mkv
+                os.remove(temp_mkv_path)
+            except Exception as e:
+                self._log_error(f'Failed to move {os.path.basename(temp_mkv_path)}: {e}')
 
     def _get_completed_temp_videos(self):
         # List of files ending in .mkv
@@ -259,14 +262,19 @@ class Recorder:
             if len(videos) == 0:
                 raise Exception(f'Above disk limit, but no videos to delete!')
 
-            # Get oldest video and its size
-            oldest = videos.pop(0)
-            size = os.path.getsize(oldest)
+            oldest_path = videos.pop(0)
+            oldest_name = os.path.basename(oldest_path)
 
-            # Delete video and update disk usage
-            self._log_info(f'Deleting {os.path.basename(oldest)}, above disk limit!')
-            os.remove(oldest)
-            bytes_over_limit -= size
+            try:
+                # Get oldest video and its size
+                size = os.path.getsize(oldest)
+
+                # Delete video and update disk usage
+                self._log_info(f'Deleting {oldest_name}, above disk limit!')
+                os.remove(oldest)
+                bytes_over_limit -= size
+            except Exception as e:
+                self._log_error(f'Failed to delete (disk) {oldest_name}: {e}')
 
     def _check_age_limit(self):
         # If ignoring age, return
@@ -280,17 +288,20 @@ class Recorder:
         for filepath in videos:
             filename = os.path.basename(filepath)
 
-            # Get the UTC datetime of the video
-            datetime_video = self._parse_video_datetime(filename)
-            
-            # Calculate age of video in hours
-            datetime_diff = datetime_now - datetime_video
-            age_sec = datetime_diff.total_seconds()
+            try:
+                # Get the UTC datetime of the video
+                datetime_video = self._parse_video_datetime(filename)
+                
+                # Calculate age of video in hours
+                datetime_diff = datetime_now - datetime_video
+                age_sec = datetime_diff.total_seconds()
 
-            if age_sec > self._max_age_sec:
-                # If video is too old, delete it
-                self._log_info(f'Deleting {filename}, video is too old!')
-                os.remove(filepath)
-            else:
-                # If not, stop checking. Further videos are even younger
-                return
+                if age_sec > self._max_age_sec:
+                    # If video is too old, delete it
+                    self._log_info(f'Deleting {filename}, video is too old!')
+                    os.remove(filepath)
+                else:
+                    # If not, stop checking. Further videos are even younger
+                    return
+            except Exception as e:
+                self._log_error(f'Failed to handle age limit for {filename}: {e}')
