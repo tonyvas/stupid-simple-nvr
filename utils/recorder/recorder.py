@@ -246,7 +246,27 @@ class Recorder:
         if self._max_disk_bytes is None:
             return
 
+        # Calculate total size
         videos = self.get_videos()
+        total_bytes = sum(os.path.getsize(video) for video in videos)
+
+        # Calculate how many bytes to free up
+        bytes_over_limit = total_bytes - self._max_disk_bytes
+
+        # Delete videos until below limit
+        while bytes_over_limit > 0:
+            # If no videos to delete, then something is very wrong
+            if len(videos) == 0:
+                raise Exception(f'Above disk limit, but no videos to delete!')
+
+            # Get oldest video and its size
+            oldest = videos.pop(0)
+            size = os.path.getsize(oldest)
+
+            # Delete video and update disk usage
+            self._log_info(f'Deleting {os.path.basename(oldest)}, above disk limit!')
+            os.remove(oldest)
+            bytes_over_limit -= size
 
     def _check_age_limit(self):
         # If ignoring age, return
@@ -269,7 +289,7 @@ class Recorder:
 
             if age_sec > self._max_age_sec:
                 # If video is too old, delete it
-                self._log_info(f'Video {filename} is too old, deleting!')
+                self._log_info(f'Deleting {filename}, video is too old!')
                 os.remove(filepath)
             else:
                 # If not, stop checking. Further videos are even younger
