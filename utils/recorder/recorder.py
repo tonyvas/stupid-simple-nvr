@@ -271,7 +271,7 @@ class Recorder:
 
                 # Delete video and update disk usage
                 self._log_info(f'Deleting {oldest_name}, above disk limit!')
-                os.remove(oldest)
+                os.remove(oldest_path)
                 bytes_over_limit -= size
             except Exception as e:
                 self._log_error(f'Failed to delete (disk) {oldest_name}: {e}')
