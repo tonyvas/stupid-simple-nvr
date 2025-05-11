@@ -16,3 +16,6 @@ class Logger:
 
     def log_error(self, message):
         self._log(f'ERROR: {message}')
+
+    def log_warning(self, message):
+        self._log(f'WARNING: {message}')

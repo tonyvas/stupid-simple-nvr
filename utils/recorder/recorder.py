@@ -3,24 +3,23 @@ from time import sleep
 from datetime import datetime, timezone
 
 from ..logger import Logger
+from ..video import Video
 
 class Recorder:
-    _MKV_EXTENSION = '.mkv'
-    _MP4_EXTENSION = '.mp4'
+    _TEMP_EXTENSION = '.mkv'
+    _FINAL_EXTENSION = '.mp4'
 
-    def __init__(self, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, record_audio:bool=True, max_age_sec:int|None=None, max_disk_bytes:int|None=None):
+    def __init__(self, logger:Logger, storage_dirpath:str, name:str, source:str, segment_duration_sec:int, record_audio:bool=True):
+        self._logger = logger
         self._storage_dirpath = storage_dirpath
         self._name = name
         self._source = source
         self._segment_duration_sec = segment_duration_sec
         self._record_audio = record_audio
-        self._max_age_sec = max_age_sec
-        self._max_disk_bytes = max_disk_bytes
-
+        
         self._is_running = False
 
         self._threads = [
-            threading.Thread(target=self._start_limit_checker, daemon=True),
             threading.Thread(target=self._start_video_mover, daemon=True),
             threading.Thread(target=self._start_ffmpeg, daemon=True),
         ]
@@ -29,25 +28,24 @@ class Recorder:
         self._video_dirpath = os.path.join(storage_dirpath, 'videos')
         self._temp_dirpath = os.path.join(storage_dirpath, 'temp')
 
-        self._logger = Logger(os.path.join(self._storage_dirpath, f'{self._name}.log'))
 
     def is_running(self):
         return self._is_running
 
     def get_videos(self):
-        video_paths = []
+        videos = []
 
         # Walk over the files in output directory
         for dirpath, dirnames, filenames in os.walk(self._video_dirpath):
             for filename in filenames:
                 # Ignore non-video files
-                if not filename.endswith(self._MP4_EXTENSION):
+                if not filename.endswith(self._FINAL_EXTENSION):
                     continue
 
-                video_paths.append(os.path.join(dirpath, filename))
+                videos.append(Video(os.path.join(dirpath, filename)))
 
-        # Return videos ordered by date (date is in alphabetical order)
-        return sorted(video_paths)
+        # Return videos ordered by date
+        return sorted(videos)
 
     def start(self):
         try:
@@ -57,13 +55,9 @@ class Recorder:
                 # Prevent multiple instances
                 raise Exception(f'Recorder is already running!')
 
-            # Ignore interrupt signals
-            # signal.signal(signal.SIGINT, signal.SIG_IGN)
-
             # Set flag
             self._is_running = True
-
-            self._log_info('Starting threads...')
+            
             for thread in self._threads:
                 thread.start()
 
@@ -89,7 +83,7 @@ class Recorder:
                 self._ffmpeg.terminate()
                 self._ffmpeg.wait()
 
-            self._log_info('Waiting for threads to finish...')
+            self._log_info('Waiting for background threads to finish...')
             for thread in self._threads:
                 thread.join()
 
@@ -104,24 +98,6 @@ class Recorder:
 
     def _log_error(self, message):
         self._logger.log_error(f'{self._name}: {message}')
-
-    def _parse_video_datetime(self, filename):
-        unix_timestamp = int(filename.split('.')[0])
-        return datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
-
-    def _start_limit_checker(self):
-        self._log_info(f'Starting limit checker...')
-
-        while self.is_running():
-            try:
-                # Check limits
-                self._check_age_limit()
-                self._check_storage_limit()
-            except Exception as e:
-                self._log_error(f'Failed to check limits: {e}')
-            finally:
-                # Delay before next check
-                sleep(5)
 
     def _start_video_mover(self):
         self._log_info(f'Starting video mover...')
@@ -194,39 +170,42 @@ class Recorder:
 
     def _move_completed_temp_videos(self):
         # For each completed .mkv file
-        for temp_mkv_path in self._get_completed_temp_videos():
+        for temp_mkv_video in self._get_completed_temp_videos():
             try:
-                self._log_info(f'Moving {os.path.basename(temp_mkv_path)}...')
+                self._log_info(f'Moving {temp_mkv_video.get_filename()}...')
 
-                # Get temp and final .mp4 paths
-                video_datetime = self._parse_video_datetime(os.path.basename(temp_mkv_path))
-                video_date_str = video_datetime.date().isoformat()
+                # Get all paths
+                date_str = temp_mkv_video.get_datetime().date().isoformat()
 
-                temp_mp4_path = temp_mkv_path.replace(self._MKV_EXTENSION, self._MP4_EXTENSION)
-                final_mp4_path = os.path.join(self._video_dirpath, video_date_str, os.path.basename(temp_mp4_path))
+                temp_mkv_path = temp_mkv_video.get_filepath()
+                temp_mp4_path = temp_mkv_path.replace(self._TEMP_EXTENSION, self._FINAL_EXTENSION)
+                final_mp4_path = os.path.join(self._video_dirpath, date_str, os.path.basename(temp_mp4_path))
 
                 # Make directory for final path
                 os.makedirs(os.path.dirname(final_mp4_path), exist_ok=True)
+
                 # Convert temp mkv to mp4
                 self._mkv_to_mp4(temp_mkv_path, temp_mp4_path)
+                
                 # Move mp4 from temp to final directory
                 shutil.move(temp_mp4_path, final_mp4_path)
+                
                 # Delete original temp mkv
                 os.remove(temp_mkv_path)
             except Exception as e:
-                self._log_error(f'Failed to move {os.path.basename(temp_mkv_path)}: {e}')
+                self._log_error(f'Failed to move {temp_mkv_video.get_filename()}: {e}')
 
     def _get_completed_temp_videos(self):
         # List of files ending in .mkv
-        filepaths = []
-        for filename in sorted(os.listdir(self._temp_dirpath)):
-            if not filename.endswith(self._MKV_EXTENSION):
+        videos = []
+        for filename in os.listdir(self._temp_dirpath):
+            if not filename.endswith(self._TEMP_EXTENSION):
                 continue
 
-            filepaths.append(os.path.join(self._temp_dirpath, filename))
+            videos.append(Video(os.path.join(self._temp_dirpath, filename)))
 
-        # Return all filenames except the last
-        return filepaths[:-1]
+        # Return all videos except the last
+        return sorted(videos)[:-1]
 
     def _mkv_to_mp4(self, input_path, output_path):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -244,64 +223,3 @@ class Recorder:
         if proc.returncode != 0:
             stderr = proc.stderr.decode('utf-8')
             raise Exception(f'Failed to convert MKV to MP4: {stderr}')
-
-    def _check_storage_limit(self):
-        if self._max_disk_bytes is None:
-            return
-
-        # Calculate total size
-        videos = self.get_videos()
-        total_bytes = sum(os.path.getsize(video) for video in videos)
-
-        # Calculate how many bytes to free up
-        bytes_over_limit = total_bytes - self._max_disk_bytes
-
-        # Delete videos until below limit
-        while bytes_over_limit > 0:
-            # If no videos to delete, then something is very wrong
-            if len(videos) == 0:
-                raise Exception(f'Above disk limit, but no videos to delete!')
-
-            oldest_path = videos.pop(0)
-            oldest_name = os.path.basename(oldest_path)
-
-            try:
-                # Get oldest video and its size
-                size = os.path.getsize(oldest)
-
-                # Delete video and update disk usage
-                self._log_info(f'Deleting {oldest_name}, above disk limit!')
-                os.remove(oldest_path)
-                bytes_over_limit -= size
-            except Exception as e:
-                self._log_error(f'Failed to delete (disk) {oldest_name}: {e}')
-
-    def _check_age_limit(self):
-        # If ignoring age, return
-        if self._max_age_sec is None:
-            return
-
-        # Get list of all videos ordered by date
-        videos = self.get_videos()
-        datetime_now = datetime.now(tz=timezone.utc)
-
-        for filepath in videos:
-            filename = os.path.basename(filepath)
-
-            try:
-                # Get the UTC datetime of the video
-                datetime_video = self._parse_video_datetime(filename)
-                
-                # Calculate age of video in hours
-                datetime_diff = datetime_now - datetime_video
-                age_sec = datetime_diff.total_seconds()
-
-                if age_sec > self._max_age_sec:
-                    # If video is too old, delete it
-                    self._log_info(f'Deleting {filename}, video is too old!')
-                    os.remove(filepath)
-                else:
-                    # If not, stop checking. Further videos are even younger
-                    return
-            except Exception as e:
-                self._log_error(f'Failed to handle age limit for {filename}: {e}')
